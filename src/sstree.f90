@@ -1,6 +1,8 @@
 ! Similarity Search (SS) Tree
 ! Ref: La Rocca, M., Advanced Algorithms and Data Structures, Ch10
 !
+! Tree constants should be M0 = k     k >= 2
+!                          M1 = 2k-1
   module sstree
     use iso_fortran_env, only : output_unit
     implicit none
@@ -9,13 +11,16 @@
 
     ! Dimensionality of ss-tree and stored points
     ! TODO temporarily made as module global parameters (to be moved to tree)
-    !integer, parameter :: DIM=3, M0=2, M1=4
-    integer, parameter :: DIM=3, M0=1, M1=3
+    !integer, parameter :: DIM=3, M0=2, M1=3
+    integer, parameter :: DIM=3, M0=6, M1=6*2-1
     integer, parameter :: WP = kind(1.0d0)
+    integer, parameter :: I8 = selected_int_kind(18)
 
     ! Debugging logs on/off
     !integer, parameter :: MSG_MEMORY = output_unit
     integer, parameter :: MSG_MEMORY = 0
+    !integer, parameter :: MSG_DELETE = output_unit
+    integer, parameter :: MSG_DELETE = 0
 
     ! Point class (public?)
     type point_t
@@ -73,6 +78,7 @@
       procedure :: insert => sstree_insert
       procedure :: delete => sstree_delete
       procedure :: isvalid => sstree_isvalid
+      procedure :: nearestNeighbor => sstree_nearestNeighbor
       final :: sstree_finalize
     end type
 
@@ -238,11 +244,6 @@
       real(WP), allocatable :: radii(:)
       real(WP) :: dis
       integer :: i
-
-      if (this % n == 0) then
- !print *, 'update bounding on empty envelope - warning'
-        return
-      endif
 
       points = this % getCentroids()
       do i = 1, DIM
@@ -425,6 +426,43 @@
       endif 
     end function
     !TODO make point/centroid the same type (point has radius component)??
+
+
+
+    pure function sortIndices(keys) result(ind)
+      real(WP), intent(in) :: keys(:)
+      integer :: ind(size(keys))
+      integer(I8) :: ibig
+!
+! Indirectly sort "key" array. Using insertion sort at the moment.
+!
+      integer :: i, j, n, i0
+      real(WP) :: key0
+
+      n = size(keys)
+      ind = [(i, i=1,n)]
+
+      do i = 2, n
+        i0 = ind(i)
+        key0 = keys(ind(i))
+        j = i - 1
+        do while ( j >= 1)
+          if (keys(ind(j)) <= key0) exit
+          ind(j+1) = ind(j)
+          j = j-1
+        enddo
+        ind(j+1) = i0
+      enddo
+
+      !TODO temporarily verify 
+      do i = 2, n
+        if (keys(ind(i-1)) > keys(ind(i))) &
+          error stop 'sortIndices - algorithm error'
+      enddo 
+      ibig = (n+n*n)/2 ! Gaussian: sum = (F+L)*n/2
+      if (sum(int(ind,kind=I8)) /= ibig) error stop 'sum not correct' 
+
+    end function sortIndices
 
 
 
@@ -634,11 +672,14 @@
       real(WP) :: key
       type(point_t) :: tmp_point
       type(ssnode_t), pointer :: tmp_node
+      !integer, allocatable :: sind(:)
+      !real(WP), allocatable :: keys(:)
 
       dir = this % directionOfMaxVariance()
 
       ! insertion sort for points or node pointers
       if (this % isleaf) then
+        !sind = sortIndices(this % points(1:this % n) % x(dir))
         do i = 1, this % n
           tmp_point = this % points(i)
           key = tmp_point % x(dir)
@@ -651,6 +692,11 @@
           this % points(j + 1) = tmp_point
         enddo
       else
+        !allocate(keys(this % n))
+        !do i = 1, this % n
+        !  keys(i) = this % children(i) % p % centroid % x(dir)
+        !enddo
+        !sind = sortIndices(keys)
         do i = 1, this % n
           tmp_node => this % children(i)%p
           key = tmp_node % centroid % x(dir)
@@ -772,7 +818,7 @@
 
 
 !
-! Delete method
+! Delete method (and its helper functions)
 !
     subroutine sstree_delete(this, target)
       class(sstree_t), intent(inout) :: this
@@ -780,34 +826,54 @@
 
       logical :: info(2)
       integer, parameter :: DELETED=1, NEEDS_FIXING=2
+      class(ssnode_t), pointer :: tmp_node
 
       if (.not. associated(this % root)) &
           error stop 'delete - empty tree'
 
+      ! Recursive function to delete point and fix tree
       info = delete(this % root, target)
+
+      ! Unsucessfull search
       if (.not. info(DELETED)) then
         print *, 'delete error - target not found'
-        stop
+        stop ! TODO deal with unsuccessfull search exception
       endif
 
-      if (info(NEEDS_FIXING)) then
-        if (this % root % n == 0) then
+      ! Does tree root pointer need updating?
+      if (.not. info(NEEDS_FIXING)) return
+
+      ! For level=0 graph, any number of points at root node is ok.
+      ! Just free the node and nullify root after last point deleted.
+      if (this % root % isleaf) then
+        if (this % root % n ==0) then
           deallocate(this % root)
-  print *, '(delete root) and tree is now empty'
-          ! and tree is now empty
-        elseif(this % root % n > 0 .and. this % root % n < M0) then
-  print *, '(delete root) has less than minimum, but its ok, nodes left =',this % root % n
-        else
-          error stop 'delete - non-empty tree needs fixing'
+          if (MSG_DELETE /= 0) write(MSG_DELETE, '(a)') &
+          & '(delete root) tree is now empty'
+        endif
+
+      else 
+        ! If non-leaf root node has just one child, it can be freed and
+        ! this child set as a new root (level of tree decreases)
+        if (this % root % n == 1) then
+          if (MSG_DELETE /= 0) write(MSG_DELETE, '(a)') &
+          & '(delete root) tree level decreasing'
+          tmp_node => this % root
+          this % root => this % root % children(1) % p
+          deallocate(tmp_node)
+        elseif (.not.(this%root%n > 1 .and. this%root%n < M0)) then
+          error stop 'delete tree - this branch should not be called'
         endif
       endif
     end subroutine sstree_delete
+
+
 
 !Listing 10.15
     recursive function delete(node, target) result(info) 
       type(ssnode_t), pointer, intent(in) :: node
       type(point_t) :: target
-      logical :: info(2) ! [was deleted?, needs fixing?]
+      logical :: info(2) ! [was deleted?, needs fixing upstream?]
 
       integer, parameter :: DELETED=1, NEEDS_FIXING=2
       integer :: i
@@ -817,23 +883,31 @@
       if (.not. associated(node)) &
         error stop 'delete - unassociated node'
 
-      if (node % isleaf) then ! leaf may contain the target point
-!print *,'(delete) leaf n=', node % n,'...'
+      if (node % isleaf) then
+        ! If leaf contains target, delete it. 
+        ! Otherwise keep searching in the upstream instance.
         i = target % isin(node % points(1:node % n))  
         if (i > 0) then 
           call node % deletePoint(target, i)
           info(DELETED) = .true.        
           info(NEEDS_FIXING) = node % n < M0 
-        else ! leaf does not contain the target
+ !if (node % n > 0) call node % updateBoundingEnvelope()
+ !TODO should we update envelope of leaf nodes?
+        else 
+          if (MSG_DELETE /= 0) write(MSG_DELETE, '(a)') &
+          & '(delete) target not in leaf, continue searching' 
           info(DELETED) = .false.
-          info(NEEDS_FIXING) = .false. ! report to caller, nothing has been done
+          info(NEEDS_FIXING) = .false. 
         endif
-!print *,'(delete) ...leaf finished, result =',info,' n=', node % n
         return
       endif
-!print *,'(delete) non-leaf n=', node % n,'...'
 
-      ! is non-leaf node
+      if (MSG_DELETE /= 0) write(MSG_DELETE, '(a,i0,a)') &
+        '(delete) non-leaf node, n=', node % n,'...'
+
+      ! Node is a non-leaf node. Search recursively among its children until
+      ! target is found or no more nodes remains to be traversed.
+      ! Skip nodes whose boundary envelope does not contain target.
       nodeToFix => null()
       info(DELETED) = .false.
       do i = 1, node % n
@@ -843,33 +917,41 @@
         if (info(DELETED)) exit
       enddo
 
-      ! no violation by a recursion call in the above loop
+      ! If no violation of the minimum number of entries in one of childrens
+      ! has been made, we can return. If target was deleted, update bounding
+      ! envelope.
       if (.not. associated(nodeToFix)) then
         if (info(DELETED)) call node % updateBoundingEnvelope()
         info(NEEDS_FIXING) = .false.  
-!print *,'(delete) ...non-leaf finished, no action needed =',info,' n=',node % n
+        if (MSG_DELETE /= 0) write(MSG_DELETE, '(a,2l,a,i0)') &
+        & '...(delete) nothing needs fixing (d/f) ',info,' n=',node % n
         return
       endif
 
-      ! one of current children (nodeToFix) needs fixing
+      ! One of current children (nodeToFix) needs fixing
       siblings = node % siblingsToBorrowFrom(nodeToFix)
       if (size(siblings) > 0) then
         ! borrow item from one of the siblings
-!print *,'(delete) borrow item'
+        if (MSG_DELETE /= 0) write(MSG_DELETE, '(a,i0)') &
+        & '...(delete) borrow item, siblings available =', size(siblings)
         call nodeToFix % borrowFromSibling(siblings)
       elseif (node % n == 1) then
-!print *,'(delete) the only child needs fixing'
-        call node % mergeChildren(nodeToFix, null())
-      else
+        !if (MSG_DELETE /= 0) write(MSG_DELETE, '(a)') &
+        !& '...(delete) single child remains, this must be a root node' 
+        !call node % mergeChildren(nodeToFix, null())
+        error stop 'delete - node with one children not removed by root'
+      elseif (node % n > 1) then 
         ! merge children
-!print *,'(delete) merge children'
+        if (MSG_DELETE /= 0) write(MSG_DELETE, '(a,i0)') &
+        & '...(delete) merge children, siblings available =', node%n-1 
         call node % mergeChildren(nodeToFix, &
         &                         node % findSiblingToMergeTo(nodeToFix))
+      else
+        error stop 'delete - impossible branch called'
       endif
       call node % updateBoundingEnvelope()
       info(DELETED) = .true.
       info(NEEDS_FIXING) = node % n < M0
-!print *,'(delete) ...no-leaf finished, result =',info,' n=', node % n
     end function delete
 
 
@@ -1009,10 +1091,8 @@
       if (this % isleaf) &
           error stop 'findSiblingToMergeTo - this must be nonleaf'
 
-      if (this % n < 2) then
-        print *, 'findSiblingToMergeTo - no siblings'
-        stop !TODO for now
-      endif
+      if (this % n < 2) &
+          error stop 'findSiblingToMergeTo - no siblings'
 
       node => null()
       mindist = huge(mindist)
@@ -1033,8 +1113,10 @@
           error stop 'findSiblingsToMergeTo - fixed not one of childrens'
 
       if (.not. associated(node)) &
-          error stop 'this error is expected - to be solved later TODO' 
+          error stop 'findSiblingsToMergeTo - null siblings returning' 
     end function
+
+
 
 !Listing 10.18
     subroutine ssnode_mergeChildren(this, childa, childb)
@@ -1049,14 +1131,7 @@
         call this % deleteChild(childb)
         call this % addChild(new)
       else
-        ! special case when last item removed and there are no siblings to
-        ! merge with
-        if (this % n == 1 .and. childa % n == 0) then
-! print *, '(merge) just removing empty node'
-          call this % deleteChild(childa)
-        else
-          print *, '(mergeChildren) - nothing to merge, stop for now'
-        endif
+print *, '(mergeChildren) - nothing to merge, must be at root'
       endif
     end subroutine ssnode_mergeChildren
 
@@ -1087,6 +1162,72 @@
 !
 ! Search methods
 !
+
+    function sstree_nearestNeighbor(this, target) result(nn)
+      class(sstree_t), intent(in) :: this
+      class(point_t), intent(in) :: target
+      type(point_t) :: nn
+
+      real(WP) :: nndist
+      integer :: nvisit
+
+      nndist = huge(nndist)
+      if (associated(this % root)) &
+        call nearestNeighbor(this % root, target, nndist, nn, nvisit)
+
+      if (nndist == huge(nndist)) then
+        print *, 'nn not found'
+      endif
+  print *, '(NN search) found ', nn%distance(target), nvisit
+  print *, nn%x
+
+    end function
+
+
+
+!Listing 10.19
+    recursive subroutine nearestNeighbor(node, target, nndist, nn, nvisit)
+      class(ssnode_t), intent(in) :: node
+      class(point_t), intent(in) :: target
+      real(WP), intent(inout) :: nndist
+      type(point_t), intent(inout) :: nn
+      integer, intent(out) :: nvisit
+
+      integer :: i, nvisit0
+      real(WP) :: dist
+      type(point_t), allocatable :: points(:)
+      integer, allocatable :: ind(:)
+      real(WP), allocatable :: distarr(:)
+
+      if (node % isleaf) then
+        do i = 1, node % n
+          dist = node % points(i) % distance(target)
+          if (dist < nndist) then
+            nndist = dist
+            nn = node % points(i)
+ print *, '(NN search) NN updated', nn%distance(target), nn%x
+          end if
+        enddo
+        nvisit = 1
+
+      else
+        nvisit = 0
+        points = node % getCentroids()
+        distarr = target % distance(points)
+        ind = sortIndices(distarr)
+        do i = 1, node % n
+          associate(child => node % children(ind(i)) % p)
+  !         if (child % centroid % distance(target) < nndist) then
+            if (child % centroid % distance(target)-child%radius < nndist) then
+              call nearestNeighbor(child, target, nndist, nn, nvisit0)
+              nvisit = nvisit + nvisit0
+            endif
+          end associate
+        enddo
+      endif
+    end subroutine nearestNeighbor
+
+
 
 !Listing 10.3
     recursive function search(node, target) result(found_node)

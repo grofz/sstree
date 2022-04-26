@@ -5,21 +5,26 @@
     integer, parameter :: DP = kind(1.0d0)
   contains
 
-    subroutine test3(n)
-      integer, parameter :: cycles=120
-      integer, intent(in) :: n
-      type(point_t) :: p0, p1
+    subroutine test3(n, cycles)
+      integer, intent(in) :: n, cycles
+
+      type(sstree_t) :: tree
+      type(point_t) :: p0, p1, t1, t2
       type(point_t), allocatable :: p(:)
       integer, allocatable :: ind(:)
       integer :: i, j
-      type(sstree_t) :: tree
       logical :: isvalid
-      real, dimension(CYCLES) :: s0, s1, e0, e1
+      real, dimension(cycles) :: s0, s1, e0, e1
 
+      ! Generate random points within the box [P0 | P1]
       p0 % x = 0.0
       p1 % x = 10.0
+
+      ! Any points that remains in tree?
+
+ goto 100
       call tree % insert(p0)
-      goto 100
+      call tree % insert(p1)
       p = random_points(n/10, p0, p1)
       ind = random_order(n/10)
       do i= 1, n/10 
@@ -27,54 +32,54 @@
       enddo
       isvalid = tree % isvalid()
       if (.not. isvalid) error stop 'invalidate during insert'
-print *, ' initial 10% of nodes'
 
       100 continue
-      do j = 1, CYCLES
+      do j = 1, cycles
         p = random_points(n, p0, p1)
         ind = random_order(n)
 
         call cpu_time(s0(j))
         do i= 1, n 
-!  print '(a,3(f5.2,1x))', 'insert =',p(ind(i))%x
           call tree % insert(p(ind(i)))
           !isvalid = tree % isvalid()
           !if (.not. isvalid) error stop 'invalidate during insert'
-!  print *
+          !print *
         enddo
         call cpu_time(e0(j))
-          isvalid = tree % isvalid()
-          if (.not. isvalid) error stop 'invalidate during insert'
+        isvalid = tree % isvalid()
+        if (.not. isvalid) error stop 'invalidate during insert'
+  cycle
 
         print *, 'delete'
         call cpu_time(s1(j))
         do i = 1, n  
-!  print '(a,3(f5.2,1x))', 'delete =',p(i)%x
           call tree % delete(p(i))
-          !isvalid = tree % isvalid()
-          !if (.not. isvalid) error stop 'invalidate during delete'
-          !print *
 
-          !if (mod(i,n/20) /= 0) cycle
-          isvalid = tree % isvalid()
-          if (.not. isvalid) error stop 'invalidate during insert'
+          ! validate 50x times and for last 50 nodes
+          if (mod(i,n/50) == 0 .or. n-i < 50) then
+            isvalid = tree % isvalid()
+            if (.not. isvalid) error stop 'invalidate during delete'
+          endif
         enddo
         call cpu_time(e1(j))
         print *, 'end of cycle ',j
       enddo
 
-      do j=1,CYCLES
+  t1 = point_t([5.0, 5.0, 5.0])
+  t2 = tree % nearestNeighbor(t1)
+  t2 = tree % nearestNeighbor(p(2))
+
+
+      do j=1, cycles
         print *, e0(j)-s0(j), e1(j)-s1(j)
       enddo
-
-
-
-
     end subroutine test3
+
+
 
     subroutine test1()
       type(sstree_t) :: tree
-      type(point_t) :: p(14)
+      type(point_t) :: p(14), tar, fou
       logical :: isvalid
       integer :: i
 
@@ -95,21 +100,24 @@ print *, ' initial 10% of nodes'
 
       isvalid = tree % isvalid()
       do i=1, 14 
-   print '(a,3(f5.2,1x))', 'insert =',p(i)%x
+        print '(a,3(f5.2,1x))', 'insert =',p(i)%x
         call tree % insert(p(i))
-        isvalid = tree % isvalid()
-   print *
-      enddo
-      !stop
-
-      print *, 'delete'
-      do i=1, 14  
-        call tree % delete(p(i))
         isvalid = tree % isvalid()
         print *
       enddo
 
-    end subroutine
+      tar = point_t([0.92, 0.92, 0.0])
+      fou = tree % nearestNeighbor(tar)
+      
+      print '(3(f5.2,1x))', fou % x
+
+      print *, 'delete'
+      do i=1, 14 
+        call tree % delete(p(i))
+        isvalid = tree % isvalid()
+        print *
+      enddo
+    end subroutine test1
 
 
 
@@ -194,18 +202,17 @@ print *, ' initial 10% of nodes'
 
   end module check_mod
 
+
+
   program check
     use check_mod
     implicit none
     integer :: i
     real(DP) :: time
     !call test1()
-    call test3(900)
+    call test3(1000000,1)
     stop
 
-    do i=1,1
-      call test2(20000, .true., time)
-    enddo
     !call test2(1000000, .false., time)
     print *, 'Tests finished!'
   end program check

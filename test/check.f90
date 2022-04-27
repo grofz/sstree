@@ -5,6 +5,77 @@
     integer, parameter :: DP = kind(1.0d0)
   contains
 
+    subroutine test4(n, m)
+      integer, intent(in) :: n, m
+!
+! Validate nearest neighbor search
+!
+      type(sstree_t) :: tree
+      type(point_t), allocatable :: p(:), q(:), f(:), ff(:)
+      type(point_t) :: p0, p1
+      logical :: isvalid
+      integer :: i
+      real(DP) :: t0, t1, t, tt
+
+      print *, 'generating points...'
+      p0 % x = 0.0
+      p1 % x = 10.0
+      p = random_points(n, p0, p1)
+      print *, 'loading tree...'
+      do i = 1, n
+        call tree % insert(p(i))
+      enddo
+      isvalid = tree % isvalid()
+      if (.not. isvalid) error stop 'invalidate during insert'
+
+
+      print *, 'searching...'
+      t = 0.0
+      tt = 0.0
+      q = random_points(m, p0, p1)
+      allocate(f(m), ff(m))
+      do i = 1, m
+        call cpu_time(t0)
+        f(i) = tree % nearestNeighbor(q(i))
+        call cpu_time(t1)
+        t = t + (t1-t0)
+        print 300, 'f  =', f(i)%x
+        call cpu_time(t0)
+        ff(i) = bf_nearestNeighbor(p,q(i))
+        call cpu_time(t1)
+        print 300, 'ff =', ff(i)%x
+        tt = tt + (t1-t0)
+        print *
+      enddo
+
+      print *
+      print *, 'valid ?', all(f == ff)
+      print 301, 'time taken =', t, tt, tt/t
+300 format (a,3(f6.3),1x)
+301 format (a,3(en12.3),1x)
+      print *, 'free tree...'
+    end subroutine
+
+
+
+    function bf_nearestNeighbor(p, q) result(nn)
+      type(point_t) :: nn
+      type(point_t), intent(in) :: p(:), q
+
+      integer  :: i
+      real(DP) :: nn_dist, dist
+
+      nn_dist = huge(nn_dist)
+      do i = 1, size(p)
+        dist = p(i) % distance(q)
+        if (dist >= nn_dist) cycle
+        nn = p(i)
+        nn_dist = dist
+      enddo
+    end function bf_nearestNeighbor
+
+
+
     subroutine test3(n, cycles)
       integer, intent(in) :: n, cycles
 
@@ -22,7 +93,6 @@
 
       ! Any points that remains in tree?
 
- goto 100
       call tree % insert(p0)
       call tree % insert(p1)
       p = random_points(n/10, p0, p1)
@@ -48,7 +118,6 @@
         call cpu_time(e0(j))
         isvalid = tree % isvalid()
         if (.not. isvalid) error stop 'invalidate during insert'
-  cycle
 
         print *, 'delete'
         call cpu_time(s1(j))
@@ -65,11 +134,6 @@
         print *, 'end of cycle ',j
       enddo
 
-  t1 = point_t([5.0, 5.0, 5.0])
-  t2 = tree % nearestNeighbor(t1)
-  t2 = tree % nearestNeighbor(p(2))
-
-
       do j=1, cycles
         print *, e0(j)-s0(j), e1(j)-s1(j)
       enddo
@@ -80,6 +144,9 @@
     subroutine test1()
       type(sstree_t) :: tree
       type(point_t) :: p(14), tar, fou
+      type(rectangle_t) :: rect
+      type(sphere_t) :: sph
+      type(point_t), allocatable :: psel(:)
       logical :: isvalid
       integer :: i
 
@@ -106,17 +173,35 @@
         print *
       enddo
 
-      tar = point_t([0.92, 0.92, 0.0])
-      fou = tree % nearestNeighbor(tar)
-      
-      print '(3(f5.2,1x))', fou % x
+      !tar = point_t([0.92, 0.92, 0.0])
+      !fou = tree % nearestNeighbor(tar)
+      !print '(3(f5.2,1x))', fou % x
 
-      print *, 'delete'
-      do i=1, 14 
-        call tree % delete(p(i))
-        isvalid = tree % isvalid()
-        print *
+      rect % lcor % x = [0.0, 0.0, 0.0]
+      rect % rcor % x = [0.5, 0.5, 0.0]
+      sph % center % x = [0.0, 0.0, 0.0]
+      sph % radius = 0.14143
+      print *,'pointsWithinRegion...'
+      !psel = tree % pointsWithinRegion(rect)
+      psel = tree % pointsWithinRegion(sph)
+      print *,'...ok'
+
+      do i = 1, size(psel)
+        print '(3(f5.2,1x))', psel(i)%x
       enddo
+      if (size(psel)==0) print *, 'no points in the region' 
+
+
+      !call delete
+    contains
+      subroutine delete
+        print *, 'delete'
+        do i=1, 14 
+          call tree % delete(p(i))
+          isvalid = tree % isvalid()
+          print *
+        enddo
+      end subroutine
     end subroutine test1
 
 
@@ -209,8 +294,9 @@
     implicit none
     integer :: i
     real(DP) :: time
-    !call test1()
-    call test3(1000000,1)
+    call test1()
+    !call test3(1000000,1)
+    !call test4(5000000,500)
     stop
 
     !call test2(1000000, .false., time)

@@ -7,7 +7,7 @@
     use iso_fortran_env, only : output_unit
     implicit none
     private
-    public sstree_t, point_t
+    public sstree_t, point_t, sphere_t, rectangle_t
 
     ! Dimensionality of ss-tree and stored points
     ! TODO temporarily made as module global parameters (to be moved to tree)
@@ -79,12 +79,50 @@
       procedure :: delete => sstree_delete
       procedure :: isvalid => sstree_isvalid
       procedure :: nearestNeighbor => sstree_nearestNeighbor
+      procedure :: pointsWithinRegion => sstree_pointsWithinRegion
       final :: sstree_finalize
     end type
 
     interface sstree_t
       module procedure new_tree
     end interface
+
+    ! region class and sub-classes
+    type, abstract :: region_t
+    contains
+      procedure(region_intersectsPoint), deferred :: intersectsPoint
+      procedure(region_intersectsRegion), deferred :: intersectsRegion
+    end type
+
+    abstract interface
+      elemental function region_intersectsPoint(this, point) result(res)
+        import
+        logical :: res
+        class(region_t), intent(in) :: this
+        class(point_t), intent(in) :: point
+      end function
+
+      elemental function region_intersectsRegion(this, region) result(res)
+        import
+        logical :: res
+        class(region_t), intent(in) :: this, region
+      end function
+    end interface
+
+    type, extends(region_t) :: sphere_t
+      type(point_t) :: center
+      real(WP)      :: radius
+    contains
+      procedure :: intersectsPoint => sphere_intersectsPoint
+      procedure :: intersectsRegion => sphere_intersectsRegion
+    end type
+
+    type, extends(region_t) :: rectangle_t
+      type(point_t) :: lcor, rcor
+    contains
+      procedure :: intersectsPoint => rectangle_intersectsPoint
+      procedure :: intersectsRegion => rectangle_intersectsRegion
+    end type
 
   contains
 
@@ -142,9 +180,11 @@
       type(sstree_t), intent(inout) :: this
       if (MSG_MEMORY /= 0) &
         write(MSG_MEMORY,'(a)', advance='no') 'sstree_finalize...'
+        write(output_unit,'(a)', advance='no') 'sstree_finalize...'
       call finalize(this % root)
       if (MSG_MEMORY /= 0) &
         write(MSG_MEMORY,'(a)') '   done.'
+        write(output_unit,'(a)') '   done.'
     end subroutine sstree_finalize
 
     recursive subroutine finalize(node) 
@@ -177,6 +217,12 @@
       class(point_t), intent(in) :: p0, p1
 
       ! Euclidean distance between points P0 and P1
+      ! The metric should follow these rules:
+      ! (1) dis is non-negative
+      ! (2) dis == 0 only for two same points
+      ! (3) symmetry: dis(P0,P1) == dis(P1,P0) 
+      ! (4) triangular inequality: dis(AB) <= dis(AC)+dis(CB),
+      !     it equals only if C lies on the line AB 
       dis = sum((p0 % x - p1 % x)**2)
       dis = sqrt(dis)
     end function point_distance
@@ -229,6 +275,125 @@
       m = mean(points, k)
       variance = sum((m - points % x(k))**2) / size(points)
     end function variance
+
+
+
+!
+! region class (sphere and rectangle) methods
+!
+    elemental function sphere_intersectsPoint(this, point) result(res)
+      logical :: res
+      class(sphere_t), intent(in) :: this
+      class(point_t), intent(in) :: point
+
+      ! point-sphere intersection?
+      res = this % center % distance(point) < this % radius
+    end function
+
+
+
+    elemental function rectangle_intersectsPoint(this, point) result(res)
+      logical :: res
+      class(rectangle_t), intent(in) :: this
+      class(point_t), intent(in) :: point
+
+      ! point-rectangle intersection?
+      associate (a => this % lcor % x, &
+                 b => this % rcor % x, &
+                 p => point % x)
+        res = all(a <= p .and. p <= b)
+      end associate
+    end function
+
+
+
+    elemental function sphere_intersectsRegion(this, region) result(res)
+      logical :: res
+      class(sphere_t), intent(in) :: this
+      class(region_t), intent(in) :: region
+
+      select type(region)
+      class is (sphere_t)
+        res = intersects_SS(this, region)
+      class is (rectangle_t)
+        res = intersects_RS(region, this)
+      class default
+        error stop 'sphere_intersectsRegion - uknown type'
+      end select
+    end function
+
+
+
+    elemental function rectangle_intersectsRegion(this, region) result(res)
+      logical :: res
+      class(rectangle_t), intent(in) :: this
+      class(region_t), intent(in) :: region
+
+      select type(region)
+      class is (sphere_t)
+        res = intersects_RS(this, region)
+      class is (rectangle_t)
+        res = intersects_RR(this, region)
+      class default
+        error stop 'rectangle_intersectsRegion - uknown type'
+      end select
+    end function
+
+
+!TODO test!??
+    elemental function intersects_RS(r, s) result(res)
+      logical :: res
+      class(rectangle_t), intent(in) :: r
+      class(sphere_t), intent(in) :: s
+
+      ! rectangle-sphere intersection?
+      type(point_t) :: wid ! rectangle size/2 vector
+      type(point_t) :: cen ! center of rectangle (C.o.R.)
+      type(point_t) :: r2s ! vector from C.o.R. to sphere center 
+      real(WP) :: dis
+
+      wid % x = abs(r % rcor % x - r % lcor % x) * 0.5_WP
+      cen % x =    (r % lcor % x + r % rcor % x) * 0.5_WP
+      r2s % x = abs(s % center % x - cen % x)
+
+      ! "wid" and "r2s" have positive components 
+      if (any(r2s % x > (wid % x + s % radius))) then
+        res = .false.
+      elseif (any(r2s % x <= wid % x)) then
+        res = .true.
+      else
+        res = r2s % distance(wid) <= s % radius
+      endif
+    end function
+
+
+
+    elemental function intersects_SS(s1, s2) result(res)
+      logical :: res
+      class(sphere_t), intent(in) :: s1, s2
+
+      ! sphere-sphere intersection?
+      res = s1 % center % distance(s2 % center) < (s1 % radius + s2 % radius)
+    end function
+
+
+
+    elemental function intersects_RR(r1, r2) result(res)
+      logical :: res
+      class(rectangle_t), intent(in) :: r1, r2
+
+      ! rectangle-rectangle intersection?
+      associate (a => r1 % lcor % x, &
+                 b => r1 % rcor % x, &
+                 c => r2 % lcor % x, &
+                 d => r2 % rcor % x)
+        ! Line ends sequences "A-B C-D" and "C-D A-B" are the only cases
+        ! when segments AB and CD do not intersect. 
+        ! Because "a<b" and "c<d" is always true, segments do not intersect
+        ! iff "b<c" or "d<a". 
+        res = all(.not.(b < c .or. d < a))
+      end associate
+    end function
 
 
 
@@ -891,7 +1056,7 @@
           call node % deletePoint(target, i)
           info(DELETED) = .true.        
           info(NEEDS_FIXING) = node % n < M0 
- !if (node % n > 0) call node % updateBoundingEnvelope()
+          if (.not. info(NEEDS_FIXING)) call node % updateBoundingEnvelope()
  !TODO should we update envelope of leaf nodes?
         else 
           if (MSG_DELETE /= 0) write(MSG_DELETE, '(a)') &
@@ -1180,7 +1345,8 @@ print *, '(mergeChildren) - nothing to merge, must be at root'
       endif
   print *, '(NN search) found ', nn%distance(target), nvisit
   print *, nn%x
-
+!TODO extend to N-nearestneighbor search
+!TODO handle better the case where "nn" is null
     end function
 
 
@@ -1226,6 +1392,50 @@ print *, '(mergeChildren) - nothing to merge, must be at root'
         enddo
       endif
     end subroutine nearestNeighbor
+
+
+!TODO combine all searches to a generic method
+    function sstree_pointsWithinRegion(this, region) result(points)
+      class(sstree_t), intent(in) :: this
+      class(region_t), intent(in) :: region
+      type(point_t), allocatable :: points(:)
+ print *,'aaa...'
+      points = pointsWithinRegion(this % root, region)
+ print *,'...aaa'
+    end function
+
+
+
+!Listing 10.20
+    recursive function pointsWithinRegion(this, region) result(points)
+      type(point_t), allocatable :: points(:)
+      class(ssnode_t), intent(in) :: this
+      class(region_t), intent(in) :: region
+
+      integer :: i
+      type(point_t), allocatable :: points_ch(:)
+ type(sphere_t) :: tmp_sphere
+
+      allocate(points(0))
+      if (this % isleaf) then
+        do i = 1, this % n
+          if (region % intersectsPoint(this % points(i))) then
+
+            points = [points, this % points(i)]
+          endif
+        enddo
+      else
+        do i = 1, this % n
+ tmp_sphere % center = this % children(i) % p % centroid
+ tmp_sphere % radius = this % children(i) % p % radius
+          if (region % intersectsRegion(tmp_sphere)) then
+            points_ch = pointsWithinRegion(this % children(i) % p, region)
+            if (size(points_ch) > 0) &
+                points = [points, points_ch]
+          endif
+        enddo
+      endif
+    end function pointsWithinRegion
 
 
 

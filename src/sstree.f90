@@ -11,8 +11,9 @@
 
     ! Dimensionality of ss-tree and stored points
     ! TODO temporarily made as module global parameters (to be moved to tree)
-    !integer, parameter :: DIM=3, M0=2, M1=3
-    integer, parameter :: DIM=3, M0=6, M1=6*2-1
+    !integer, parameter :: M0=2, M1=3
+    integer, parameter :: DIM=3
+    !integer, parameter :: M0=6, M1=6*2-1
     integer, parameter :: WP = kind(1.0d0)
     integer, parameter :: I8 = selected_int_kind(18)
 
@@ -41,8 +42,8 @@
     type ssnode_t
       type(point_t)    :: centroid
       real(WP)         :: radius
-      type(ssnode_ptr) :: children(M1+1)
-      type(point_t)    :: points(M1+1)
+      type(ssnode_ptr), allocatable :: children(:)
+      type(point_t), allocatable    :: points(:)
       logical          :: isleaf ! ... or internal node with children
       integer          :: n = 0
     contains
@@ -73,7 +74,8 @@
     ! ss-tree class (public)
     type sstree_t
       type(ssnode_t), pointer :: root => null()
-      integer :: m0, m1, dim ! TODO not used at the moment
+      integer :: m0 = 2, m1 = 3
+      integer :: dim ! TODO not used at the moment
     contains
       procedure :: insert => sstree_insert
       procedure :: delete => sstree_delete
@@ -129,11 +131,15 @@
 !
 ! Ss-node and ss-tree class constructors
 !
-    function new_node(children)
+    function new_node(children, tree)
       type(ssnode_t), pointer :: new_node
       type(ssnode_ptr), intent(in) :: children(:)
+      type(sstree_t), intent(in) :: tree
 
+      if (size(children) > tree % m1 + 1) &
+          error stop 'new_node - children arr too big'
       allocate(new_node)
+      allocate(new_node % children(tree % m1+1))
       new_node % n = size(children)
       new_node % isleaf = .false.
       new_node % children(1: new_node % n) = children
@@ -145,11 +151,15 @@
       endif
     end function new_node
 
-    function new_leaf(points)
+    function new_leaf(points, tree)
       type(ssnode_t), pointer :: new_leaf
       type(point_t), intent(in) :: points(:)
+      type(sstree_t), intent(in) :: tree
 
+      if (size(points) > tree % m1 + 1) &
+          error stop 'new_leaf - points arr too big'
       allocate(new_leaf)
+      allocate(new_leaf % points(tree % m1+1))
       new_leaf % n = size(points)
       new_leaf % isleaf = .true.
       new_leaf % points(1: new_leaf % n) = points
@@ -161,13 +171,26 @@
       endif
     end function new_leaf
 
-    function new_tree(adim, am0, am1)
+    function new_tree(k)
       type(sstree_t) :: new_tree
-      integer, intent(in) :: adim, am0, am1
+      integer, intent(in), optional :: k ! branching factor k >= 2
 
-      new_tree % m0 = am0
-      new_tree % m1 = am1
-      new_tree % dim = adim
+      !integer :: adim, am0, am1
+      integer, parameter :: KDEF = 2
+      integer :: k0
+
+      k0 = KDEF
+      if (present(k)) then
+        if (k >= 2) then
+          k0 = k
+        else
+          error stop 'new tree - branching factor must be 2 or larger'
+        endif
+      endif
+
+      new_tree % m0 = k0
+      new_tree % m1 = 2*k0-1
+      !new_tree % dim = adim
 ! TODO not finished
     end function
 
@@ -451,7 +474,8 @@
 
       if (.not. this % isleaf) &
           error stop 'addPoint - is not leaf'
-      if (this % n > M1) &
+      !if (this % n > M1) &
+      if (this % n > size(this % points)-1) &
           error stop 'addPoint - size oveflows'
       if (point % isin(this % points(1:this % n))>0) &
           error stop 'addPoint - duplicate point'
@@ -499,8 +523,9 @@
 
       if (this % isleaf) &
           error stop 'addChild - is not internal node'
-      if (this % n > M1) &
-          error stop 'addChild - size oveflows'
+      !if (this % n > M1) &
+      if (this % n > size(this % children)-1) &
+           error stop 'addChild - size oveflows'
       do i = 1, this % n
         if (associated(this % children(i) % p, child)) &
             error stop 'addChild - duplicate node'
@@ -641,7 +666,7 @@
       type(point_t), allocatable :: points(:)
 
       if (associated(this % root)) then
-        call validate(this % root, this % root, isvalid, level, points, nch)
+        call validate(this % root, this, isvalid, level, points, nch)
         print '(a,l1,a,i0,a,i0,a,i0)', &
             '(isvalid) valid? ',isvalid,'  level=',level,'  n=',size(points),&
             ' children=',nch
@@ -653,9 +678,9 @@
 
 
 
-    recursive subroutine validate(node, root, isvalid, level, points, nch)
+    recursive subroutine validate(node, tree, isvalid, level, points, nch)
       type(ssnode_t), pointer, intent(in) :: node
-      type(ssnode_t), pointer, intent(in) :: root
+      type(sstree_t), intent(in) :: tree
       logical, intent(out) :: isvalid
       integer, intent(out) :: level, nch
       type(point_t), intent(out), allocatable :: points(:)
@@ -670,9 +695,10 @@
 
       ! no. of children must always be between M0 and M1
       isvalid = .false.
-      if (node % n > M1) then
+      if (node % n > tree % m1) then
         print *, 'validation fails, too many children'
-      elseif (node % n < M0 .and. .not. associated(node, root)) then
+      elseif (node % n < tree % m0 .and. &
+      &       .not. associated(node, tree % root)) then
         print *, 'validation fails, too few children'
       elseif (node % n < 1) then
         print *, 'validation fails, too few children (even for a root)'
@@ -700,7 +726,7 @@
       nch = 0
       allocate(points(0))
       do i = 1, node % n
-        call validate(node%children(i)%p, root, isvalid0, level0, points0, &
+        call validate(node%children(i)%p, tree, isvalid0, level0, points0, &
         &             nch0)
         if (level == -1) level = level0
         if (.not. isvalid0) then
@@ -742,16 +768,16 @@
       type(ssnode_ptr) :: new(2)
 
       if (.not. associated(this % root)) then
-        this % root => ssnode_t([point])
+        this % root => ssnode_t([point], this)
       else
-        new = insert(this % root, point)
+        new = insert(this % root, point, this)
         if (associated(new(1) % p)) then
           if (MSG_MEMORY /= 0) &
           &   write(MSG_MEMORY, '(a,i0,a,l1)') &
           &   '(insert dealloc root) nold=', this%root%n, &
           &   ' isleaf=', this%root%isleaf
           deallocate(this % root)
-          this % root => ssnode_t([new(1), new(2)])
+          this % root => ssnode_t([new(1), new(2)], this)
         endif
       endif
     end subroutine sstree_insert
@@ -759,10 +785,11 @@
 
 
 !Listing 10.6
-    recursive function insert(node, point) result(res)
+    recursive function insert(node, point, tree) result(res)
       type(ssnode_ptr) :: res(2)
       type(ssnode_t), pointer :: node
       type(point_t), intent(in) :: point
+      type(sstree_t), intent(in) :: tree
 !
 ! Insert point to node's subtree. Returns null (if all ok) or
 ! a pair of nodes resulting from the split.
@@ -786,10 +813,10 @@
         endif
         call node % addPoint(point)
         call node % updateBoundingEnvelope()
-        if (node % n <= M1) return
+        if (node % n <= tree % m1) return
       else
         child => node % findClosestChild(point)
-        res0 = insert(child, point)
+        res0 = insert(child, point, tree)
         if (.not. associated(res0(1) % p)) then
           call node % updateBoundingEnvelope()
           return
@@ -798,36 +825,38 @@
           call node % addChild(res0(1) % p)
           call node % addChild(res0(2) % p)
           call node % updateBoundingEnvelope()
-          if (node % n <= M1) return
+          if (node % n <= tree % m1) return
         endif
       endif
-      res = node % split()
+      res = node % split(tree)
     end function insert
 
 
 
 !Listing 10.11
-    function ssnode_split(this) result(split)
+    function ssnode_split(this, tree) result(split)
       type(ssnode_ptr) :: split(2)
       class(ssnode_t), intent(inout) :: this
+      class(sstree_t), intent(in) :: tree
 
       integer :: ind
 
-      call this % findSplitIndex(ind)
+      call this % findSplitIndex(tree, ind)
       if (this % isleaf) then
-        split(1) % p => ssnode_t(this % points(1:ind-1))
-        split(2) % p => ssnode_t(this % points(ind:this % n))
+        split(1) % p => ssnode_t(this % points(1:ind-1), tree)
+        split(2) % p => ssnode_t(this % points(ind:this % n), tree)
       else
-        split(1) % p => ssnode_t(this % children(1:ind-1))
-        split(2) % p => ssnode_t(this % children(ind: this % n))
+        split(1) % p => ssnode_t(this % children(1:ind-1), tree)
+        split(2) % p => ssnode_t(this % children(ind: this % n), tree)
       endif
     end function
 
 
 
 !Listing 10.12
-    subroutine ssnode_findSplitIndex(this, ind)
+    subroutine ssnode_findSplitIndex(this, tree, ind)
       class(ssnode_t), intent(inout) :: this
+      class(sstree_t), intent(in) :: tree
       integer, intent(out) :: ind
 !
 ! Prepare for splitting the node. Reorder points/children and return
@@ -875,7 +904,7 @@
         enddo
       endif
 
-      ind = this % minVarianceSplit(dir)
+      ind = this % minVarianceSplit(dir, tree)
     end subroutine ssnode_findSplitIndex
 
 
@@ -903,10 +932,11 @@
 
 
 !Listing 10.14
-    pure function ssnode_minVarianceSplit(this, dir) result(split_index)
+    pure function ssnode_minVarianceSplit(this, dir, tree) result(split_index)
       integer :: split_index
       class(ssnode_t), intent(in) :: this
       integer, intent(in) :: dir
+      class(sstree_t), intent(in) :: tree
 ! 
 ! Get spliting index (index where the second half begins).
 ! Points/children arrays must be already sorted along dir's dimension
@@ -917,8 +947,8 @@
       
       points = this % getCentroids()
       minvar = huge(minvar)
-      split_index = M0 + 1
-      do i = M0 + 1, this % n - M0 + 1
+      split_index = tree % m0 + 1
+      do i = tree % m0 + 1, this % n - tree % m0 + 1
         var  = variance(points(1:i-1), dir) &
             &+ variance(points(i:this % n), dir)
         if (var < minvar) then
@@ -997,7 +1027,7 @@
           error stop 'delete - empty tree'
 
       ! Recursive function to delete point and fix tree
-      info = delete(this % root, target)
+      info = delete(this % root, target, this)
 
       ! Unsucessfull search
       if (.not. info(DELETED)) then
@@ -1026,7 +1056,7 @@
           tmp_node => this % root
           this % root => this % root % children(1) % p
           deallocate(tmp_node)
-        elseif (.not.(this%root%n > 1 .and. this%root%n < M0)) then
+        elseif (.not.(this%root%n > 1 .and. this%root%n < this%m0)) then
           error stop 'delete tree - this branch should not be called'
         endif
       endif
@@ -1035,9 +1065,10 @@
 
 
 !Listing 10.15
-    recursive function delete(node, target) result(info) 
+    recursive function delete(node, target, tree) result(info) 
       type(ssnode_t), pointer, intent(in) :: node
       type(point_t) :: target
+      type(sstree_t), intent(in) :: tree
       logical :: info(2) ! [was deleted?, needs fixing upstream?]
 
       integer, parameter :: DELETED=1, NEEDS_FIXING=2
@@ -1055,7 +1086,7 @@
         if (i > 0) then 
           call node % deletePoint(target, i)
           info(DELETED) = .true.        
-          info(NEEDS_FIXING) = node % n < M0 
+          info(NEEDS_FIXING) = node % n < tree % m0 
           if (.not. info(NEEDS_FIXING)) call node % updateBoundingEnvelope()
  !TODO should we update envelope of leaf nodes?
         else 
@@ -1077,7 +1108,7 @@
       info(DELETED) = .false.
       do i = 1, node % n
         if (.not. node % children(i) % p % intersectsPoint(target)) cycle
-        info = delete(node % children(i) % p, target)
+        info = delete(node % children(i) % p, target, tree)
         if (info(NEEDS_FIXING)) nodeToFix => node % children(i) % p
         if (info(DELETED)) exit
       enddo
@@ -1094,12 +1125,12 @@
       endif
 
       ! One of current children (nodeToFix) needs fixing
-      siblings = node % siblingsToBorrowFrom(nodeToFix)
+      siblings = node % siblingsToBorrowFrom(nodeToFix, tree)
       if (size(siblings) > 0) then
         ! borrow item from one of the siblings
         if (MSG_DELETE /= 0) write(MSG_DELETE, '(a,i0)') &
         & '...(delete) borrow item, siblings available =', size(siblings)
-        call nodeToFix % borrowFromSibling(siblings)
+        call nodeToFix % borrowFromSibling(siblings, tree)
       elseif (node % n == 1) then
         !if (MSG_DELETE /= 0) write(MSG_DELETE, '(a)') &
         !& '...(delete) single child remains, this must be a root node' 
@@ -1110,21 +1141,23 @@
         if (MSG_DELETE /= 0) write(MSG_DELETE, '(a,i0)') &
         & '...(delete) merge children, siblings available =', node%n-1 
         call node % mergeChildren(nodeToFix, &
-        &                         node % findSiblingToMergeTo(nodeToFix))
+        &                         node % findSiblingToMergeTo(nodeToFix), &
+        &                         tree)
       else
         error stop 'delete - impossible branch called'
       endif
       call node % updateBoundingEnvelope()
       info(DELETED) = .true.
-      info(NEEDS_FIXING) = node % n < M0
+      info(NEEDS_FIXING) = node % n < tree % m0
     end function delete
 
 
 
-    function ssnode_siblingsToBorrowFrom(this, fixed) result(siblings)
+    function ssnode_siblingsToBorrowFrom(this, fixed, tree) result(siblings)
       type(ssnode_ptr), allocatable :: siblings(:)
       class(ssnode_t), intent(in) :: this
       class(ssnode_t), pointer, intent(in) :: fixed
+      class(sstree_t), intent(in) :: tree
 !
 ! On of this node's children (fixed) is one item short. Make a list of all
 ! fixed's sibling with more than "M0" items that can borrow one of its items
@@ -1138,10 +1171,10 @@
       if (this % isleaf) &
           error stop 'siblingsToBorrowFrom - node is leaf'
 
-      if (fixed % n >= M0) &
+      if (fixed % n >= tree % m0) &
           error stop 'siblingsToBorrowFrom - fixed node has enough items'
 
-      allocate(tmplist(M1))
+      allocate(tmplist(tree % m1))
       nfound = 0
       fixed_contained = .false.
       do i = 1, this % n
@@ -1149,7 +1182,7 @@
           fixed_contained = .true.
           cycle
         endif
-        if (this % children(i) % p % n <= M0) cycle
+        if (this % children(i) % p % n <= tree % m0) cycle
         nfound = nfound + 1
         tmplist(nfound) % p => this % children(i) % p
       enddo
@@ -1163,9 +1196,10 @@
     
 
 ! Listing 10.17
-    subroutine ssnode_borrowFromSibling(this, siblings)
+    subroutine ssnode_borrowFromSibling(this, siblings, tree)
       class(ssnode_t), intent(inout) :: this
-      type(ssnode_ptr) :: siblings(:)
+      type(ssnode_ptr), intent(in) :: siblings(:)
+      class(sstree_t), intent(in) :: tree
 
       integer :: closest_i, i
       !type(ssnode_t), pointer :: closest_s
@@ -1177,7 +1211,7 @@
       do i = 1, size(siblings)
         if (.not. associated(siblings(i)%p)) &
           error stop 'borrowFromSiblings - unassociated node'
-        if (siblings(i) % p % n <= M0) &
+        if (siblings(i) % p % n <= tree % m0) &
           error stop 'borrowFromSiblings - too few items for a sibling'
       enddo
 
@@ -1284,14 +1318,15 @@
 
 
 !Listing 10.18
-    subroutine ssnode_mergeChildren(this, childa, childb)
+    subroutine ssnode_mergeChildren(this, childa, childb, tree)
       class(ssnode_t), intent(inout) :: this
       class(ssnode_t), pointer :: childa, childb
+      class(sstree_t), intent(in) :: tree
 
       type(ssnode_t), pointer :: new
 
       if (associated(childb)) then
-        new => merge2(childa, childb)
+        new => merge2(childa, childb, tree)
         call this % deleteChild(childa)
         call this % deleteChild(childb)
         call this % addChild(new)
@@ -1302,19 +1337,20 @@ print *, '(mergeChildren) - nothing to merge, must be at root'
 
 
 
-    function merge2(a, b) result(new)
+    function merge2(a, b, tree) result(new)
       class(ssnode_t), intent(in) :: a, b
       type(ssnode_t), pointer :: new
+      class(sstree_t), intent(in) :: tree
 
       type(point_t), allocatable :: points(:)
       type(ssnode_ptr), allocatable :: children(:)
 
       if (a % isleaf .and. b % isleaf) then
         points = [a % points(1:a % n), b % points(1:b % n)]
-        new => ssnode_t(points)
+        new => ssnode_t(points, tree)
       elseif (.not. a % isleaf .and. .not. b % isleaf) then
         children = [a % children(1:a % n), b % children(1:b % n)]
-        new => ssnode_t(children)
+        new => ssnode_t(children, tree)
       else
           error stop 'merge2 - operands are not of the same type'
       endif
@@ -1343,8 +1379,8 @@ print *, '(mergeChildren) - nothing to merge, must be at root'
       if (nndist == huge(nndist)) then
         print *, 'nn not found'
       endif
-  print *, '(NN search) found ', nn%distance(target), nvisit
-  print *, nn%x
+! print *, '(NN search) found ', nn%distance(target), nvisit
+! print *, nn%x
 !TODO extend to N-nearestneighbor search
 !TODO handle better the case where "nn" is null
     end function
@@ -1371,7 +1407,7 @@ print *, '(mergeChildren) - nothing to merge, must be at root'
           if (dist < nndist) then
             nndist = dist
             nn = node % points(i)
- print *, '(NN search) NN updated', nn%distance(target), nn%x
+!print *, '(NN search) NN updated', nn%distance(target), nn%x
           end if
         enddo
         nvisit = 1

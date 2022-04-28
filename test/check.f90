@@ -1,5 +1,6 @@
   module check_mod
     use sstree
+    use point_mod, only : point_t, sphere_t, rectangle_t
     implicit none
   contains
 

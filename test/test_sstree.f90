@@ -1,5 +1,6 @@
   module test_sstree_mod
     use sstree
+    use point_mod, only : point_t
     use utest_mod
     implicit none
     private

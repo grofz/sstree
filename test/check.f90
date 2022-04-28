@@ -78,7 +78,7 @@
     type(utest_t) :: utest
 
     utest = utest_t()
-    !call test1()
+    call test1()
     call testInsertDelete(utest, 10000, 10, 3)
     call testNNSearch(utest, 10000, 100, 10, 6)
 

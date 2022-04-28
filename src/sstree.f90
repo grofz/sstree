@@ -30,8 +30,7 @@
 
     ! ss-node class (either internal node or a leaf)
     type ssnode_t
-      type(point_t)    :: centroid
-      real(WP)         :: radius
+      type(sphere_t) :: centroid
       type(ssnode_ptr), allocatable :: children(:)
       type(point_t), allocatable    :: points(:)
       logical          :: isleaf ! ... or internal node with children
@@ -65,7 +64,7 @@
     type sstree_t
       type(ssnode_t), pointer :: root => null()
       integer :: m0 = 2, m1 = 3
-      integer :: dim ! TODO not used at the moment
+      !integer :: dim ! TODO not used at the moment
     contains
       procedure :: insert => sstree_insert
       procedure :: delete => sstree_delete
@@ -101,7 +100,7 @@
       if (MSG_MEMORY /= 0) then
         write(MSG_MEMORY, '(a,i0,a,3(en12.3,1x),a,en12.3)') &
         '(newnode) children=', new_node % n, &
-        '  XC=',new_node%centroid%x,'  R=',new_node%radius
+        '  XC=',new_node%centroid%center%x,'  R=',new_node%centroid%radius
       endif
     end function new_node
 
@@ -121,7 +120,7 @@
       if (MSG_MEMORY /= 0) then
         write(MSG_MEMORY, '(a,i0,a,3(en12.3,1x),a,en12.3)') &
         '(newleaf) children=', new_leaf % n, &
-        '  XC=',new_leaf%centroid%x,'  R=',new_leaf%radius
+        '  XC=',new_leaf%centroid%center%x,'  R=',new_leaf%centroid%radius
       endif
     end function new_leaf
 
@@ -129,7 +128,6 @@
       type(sstree_t) :: new_tree
       integer, intent(in), optional :: k ! branching factor k >= 2
 
-      !integer :: adim, am0, am1
       integer, parameter :: KDEF = 2
       integer :: k0
 
@@ -144,8 +142,6 @@
 
       new_tree % m0 = k0
       new_tree % m1 = 2*k0-1
-      !new_tree % dim = adim
-! TODO not finished
     end function
 
 
@@ -183,6 +179,7 @@
       ! ...and deallocate the node itself
       deallocate(node)
     end subroutine finalize
+
 
 
 !
@@ -229,22 +226,25 @@
 
       points = this % getCentroids()
       do i = 1, POINT_DIM
-        this % centroid % x(i) = mean(points, i)
+        this % centroid % center % x(i) = mean(points, i)
       enddo
 
-      this % radius = 0.0
-      if (this % isleaf) then
-        do i = 1, this % n
-          dis = points(i) % distance(this % centroid)
-          if (dis > this % radius) this % radius = dis
-        enddo
-      else
-        radii = this % getRadii()
-        do i = 1, this % n
-          dis = points(i) % distance(this % centroid) + radii(i)
-          if (dis > this % radius) this % radius = dis
-        enddo
-      endif
+      associate(rad => this % centroid % radius, &
+                cen => this % centroid % center )
+        rad = 0.0
+        if (this % isleaf) then
+          do i = 1, this % n
+            dis = points(i) % distance(cen)
+            if (dis > rad) rad = dis
+          enddo
+        else
+          radii = this % getRadii()
+          do i = 1, this % n
+            dis = points(i) % distance(cen) + radii(i)
+            if (dis > rad) rad = dis
+          enddo
+        endif
+      end associate
     end subroutine ssnode_updateBoundingEnvelope
 
 
@@ -254,7 +254,9 @@
       class(ssnode_t), intent(in) :: this
       class(point_t), intent(in) :: point
 
-      res = this % centroid % distance(point) <= this % radius
+      res = this % centroid % center % distance(point) <= this % centroid % radius
+      !TODO
+      !res = this % centroid % intersectsPoint(point)
     end function ssnode_intersectsPoint
 
 
@@ -386,7 +388,7 @@
         centroids = this % points(1:this % n)
       else
         do i=1, this % n
-          centroids(i) = this % children(i) % p % centroid
+          centroids(i) = this % children(i) % p % centroid % center
         enddo
       endif 
     end function
@@ -405,7 +407,7 @@
         error stop 'getradii - node is a leaf'
       else
         do i=1, this % n
-          radii(i) = this % children(i) % p % radius
+          radii(i) = this % children(i) % p % centroid % radius
         enddo
       endif 
     end function
@@ -687,10 +689,10 @@
         !sind = sortIndices(keys)
         do i = 1, this % n
           tmp_node => this % children(i)%p
-          key = tmp_node % centroid % x(dir)
+          key = tmp_node % centroid % center % x(dir)
           j = i - 1
           do while (j >= 1)
-            if (this%children(j)%p%centroid%x(dir) <= key) exit
+            if (this%children(j)%p%centroid%center%x(dir) <= key) exit
             this % children(j + 1)%p => this % children(j)%p
             j = j - 1
           enddo
@@ -794,7 +796,7 @@
       mindis = huge(mindis)
       res => null()
       do i = 1, this % n
-        dis = this % children(i) % p % centroid % distance(target)
+        dis = this % children(i) % p % centroid % center % distance(target)
         if (dis >= mindis) cycle
         mindis = dis
         res => this % children(i) % p
@@ -1043,7 +1045,7 @@
         mindist = huge(mindist)
         if (siblings(i) % p % isleaf) then
           do j = 1, siblings(i) % p % n
-            dist = targetNode % centroid % distance( &
+            dist = targetNode % centroid % center % distance( &
                    siblings(i) % p % points(j))
             if (dist >= mindist) cycle
             minj = j
@@ -1051,8 +1053,8 @@
           enddo
         else
           do j = 1, siblings(i) % p % n
-            dist = targetNode % centroid % distance( &
-                   siblings(i) % p % children(j) % p % centroid)
+            dist = targetNode % centroid % center % distance( &
+                   siblings(i) % p % children(j) % p % centroid % center)
             if (dist >= mindist) cycle
             minj = j
             mindist = dist
@@ -1095,8 +1097,8 @@
           fixed_contained = .true.
           cycle
         endif
-        dist = fixed % centroid % distance( &
-               this % children(i) % p % centroid)
+        dist = fixed % centroid % center % distance( &
+               this % children(i) % p % centroid % center)
          if (dist >= mindist) cycle
          mindist = dist
          node => this % children(i) % p
@@ -1214,7 +1216,7 @@ print *, '(mergeChildren) - nothing to merge, must be at root'
         do i = 1, node % n
           associate(child => node % children(ind(i)) % p)
   !         if (child % centroid % distance(target) < nndist) then
-            if (child % centroid % distance(target)-child%radius < nndist) then
+            if (child % centroid % center % distance(target)-child%centroid%radius < nndist) then
               call nearestNeighbor(child, target, nndist, nn, nvisit0)
               nvisit = nvisit + nvisit0
             endif
@@ -1244,7 +1246,7 @@ print *, '(mergeChildren) - nothing to merge, must be at root'
 
       integer :: i
       type(point_t), allocatable :: points_ch(:)
- type(sphere_t) :: tmp_sphere
+!type(sphere_t) :: tmp_sphere
 
       allocate(points(0))
       if (this % isleaf) then
@@ -1256,9 +1258,10 @@ print *, '(mergeChildren) - nothing to merge, must be at root'
         enddo
       else
         do i = 1, this % n
- tmp_sphere % center = this % children(i) % p % centroid
- tmp_sphere % radius = this % children(i) % p % radius
-          if (region % intersectsRegion(tmp_sphere)) then
+!tmp_sphere % center = this % children(i) % p % centroid
+!tmp_sphere % radius = this % children(i) % p % radius
+          !if (region % intersectsRegion(tmp_sphere)) then
+          if (region % intersectsRegion(this % children(i) % p % centroid)) then
             points_ch = pointsWithinRegion(this % children(i) % p, region)
             if (size(points_ch) > 0) &
                 points = [points, points_ch]

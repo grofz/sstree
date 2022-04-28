@@ -16,6 +16,12 @@
       generic :: operator(==) => point_equals
     end type
 
+    interface point_t
+      module procedure new_point
+    end interface
+
+
+
     ! region class and sub-classes
     type, abstract :: region_t
     contains
@@ -38,6 +44,8 @@
       end function
     end interface
 
+
+
     type, extends(region_t) :: sphere_t
       type(point_t) :: center
       real(WP)      :: radius
@@ -46,13 +54,49 @@
       procedure :: intersectsRegion => sphere_intersectsRegion
     end type
 
+    interface new_sphere
+      module procedure :: new_sphere
+    end interface
+
+
+
     type, extends(region_t) :: rectangle_t
       type(point_t) :: lcor, rcor
     contains
       procedure :: intersectsPoint => rectangle_intersectsPoint
       procedure :: intersectsRegion => rectangle_intersectsRegion
     end type
+
+    interface rectangle_t
+      module procedure new_rectangle
+    end interface
+
   contains
+!
+! Class constructors
+!
+    pure type(point_t) function new_point(x)
+      real(WP), intent(in) :: x(:)
+      if (size(x) > POINT_DIM) &
+          error stop 'new point - out of dimension bounds'
+      new_point % x = 0.0
+      new_point % x(1:size(x)) = x
+    end function
+
+    elemental type(sphere_t) function new_sphere(p,r)
+      class(point_t), intent(in) :: p
+      real(WP), intent(in) :: r
+      new_sphere % center = p
+      new_sphere % radius = r
+    end function
+
+    elemental type(rectangle_t) function new_rectangle(p0,p1)
+      class(point_t), intent(in) :: p0, p1
+      new_rectangle % lcor = p0
+      new_rectangle % rcor = p1
+    end function
+
+
 
 !
 ! Point class methods
@@ -98,7 +142,7 @@
 
 
 !
-! region class (sphere and rectangle) methods
+! intersectsPoint / intersectsRegion methods
 !
     elemental function sphere_intersectsPoint(this, point) result(res)
       logical :: res
@@ -213,4 +257,5 @@
         res = all(.not.(b < c .or. d < a))
       end associate
     end function
+
   end module point_mod

@@ -5,7 +5,7 @@
 !                          M1 = 2k-1
   module sstree
     use iso_fortran_env, only : output_unit
-    use point_mod, only : point_t, POINT_DIM, region_t, sphere_t
+    use point_mod, only : point_t, POINT_DIM, WP, region_t, sphere_t
     implicit none
     private
     public sstree_t
@@ -14,7 +14,6 @@
     ! TODO temporarily made as module global parameters (to be moved to tree)
     !integer, parameter :: M0=2, M1=3
     !integer, parameter :: M0=6, M1=6*2-1
-    integer, parameter :: WP = kind(1.0d0)
     integer, parameter :: I8 = selected_int_kind(18)
 
     ! Debugging logs on/off

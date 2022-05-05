@@ -1,9 +1,9 @@
   module point_mod
     implicit none
     private
-    public point_t, POINT_DIM, region_t, sphere_t, rectangle_t
+    public point_t, POINT_DIM, WP, region_t, sphere_t, rectangle_t
 
-    integer, parameter :: WP = kind(1.0d0)
+    integer, parameter :: WP = selected_real_kind(15, 307)
     integer, parameter :: POINT_DIM = 3
 
     ! Point class (public?)

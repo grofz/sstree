@@ -13,20 +13,20 @@
       logical :: isvalid
       integer :: i
 
-      p(1) = point_t([1.0, 0.0, 0.0])
-      p(2) = point_t([1.0, 1.0, 0.0])
-      p(3) = point_t([0.0, 0.0, 0.0])
-      p(4) = point_t([0.5, 0.5, 0.0])
-      p(5) = point_t([0.1, 0.1, 0.0])
-      p(6) = point_t([0.9, 0.1, 0.0])
-      p(7) = point_t([0.9, 0.9, 0.0])
-      p(8) = point_t([1.0, 0.1, 0.0])
-      p(9) = point_t([1.0, 0.9, 0.0])
-      p(10) = point_t([0.2, 0.2, 0.0])
-      p(11) = point_t([0.2, 0.3, 0.0])
-      p(12) = point_t([0.2, 0.4, 0.0])
-      p(13) = point_t([0.9, 0.7, 0.0])
-      p(14) = point_t([0.1, 0.7, 0.0])
+       p(1) = point_t([1.0, 0.0])
+       p(2) = point_t([1.0, 1.0])
+       p(3) = point_t([0.0, 0.0])
+       p(4) = point_t([0.5, 0.5])
+       p(5) = point_t([0.1, 0.1])
+       p(6) = point_t([0.9, 0.1])
+       p(7) = point_t([0.9, 0.9])
+       p(8) = point_t([1.0, 0.1])
+       p(9) = point_t([1.0, 0.9])
+       p(10) = point_t([0.2, 0.2])
+       p(11) = point_t([0.2, 0.3])
+       p(12) = point_t([0.2, 0.4])
+       p(13) = point_t([0.9, 0.7])
+       p(14) = point_t([0.1, 0.7])
 
       isvalid = tree % isvalid()
       do i=1, 14 
@@ -40,10 +40,8 @@
       !fou = tree % nearestNeighbor(tar)
       !print '(3(f5.2,1x))', fou % x
 
-      rect % lcor % x = [0.0, 0.0, 0.0]
-      rect % rcor % x = [0.5, 0.5, 0.0]
-      sph % center % x = [0.0, 0.0, 0.0]
-      sph % radius = 0.14143
+      rect = rectangle_t(point_t([0.0,0.0]), point_t([0.5,0.5]))
+      sph = sphere_t(point_t([0.0,0.0]), 1.34143)
       print *,'pointsWithinRegion...'
       !psel = tree % pointsWithinRegion(rect)
       psel = tree % pointsWithinRegion(sph)
@@ -79,8 +77,8 @@
 
     utest = utest_t()
     call test1()
-    call testInsertDelete(utest, 10000, 10, 3)
-    call testNNSearch(utest, 10000, 100, 10, 6)
+    !call testInsertDelete(utest, 10000, 10, 3)
+    !call testNNSearch(utest, 10000, 100, 10, 6)
 
     call utest % summarize()
     print *, 'Tests finished!'

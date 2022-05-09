@@ -2,6 +2,7 @@
     implicit none
     private
     public point_t, POINT_DIM, WP, region_t, sphere_t, rectangle_t
+    public point_mag
 
     integer, parameter :: WP = selected_real_kind(15, 307)
     integer, parameter :: POINT_DIM = 3
@@ -18,6 +19,12 @@
 
     interface point_t
       module procedure new_point
+    end interface
+
+    interface point_mag
+      module procedure point_mag2
+      module procedure point_mag3
+      module procedure point_mag4
     end interface
 
 
@@ -118,6 +125,54 @@
 
 
 
+    elemental function point_mag2(p0, p1) result(dis)
+      real(WP) :: dis
+      class(point_t), intent(in) :: p0, p1
+!
+! Length of line P0-P1
+!
+      dis = sum((p0 % x - p1 % x)**2)
+      dis = sqrt(dis)
+    end function point_mag2
+
+
+
+    elemental function point_mag3(p0, p1, p2) result(area)
+      real(WP) :: area
+      class(point_t), intent(in) :: p0, p1, p2
+!
+! Area of triangle P0-P1-P2
+!
+      real(WP), dimension(POINT_DIM) :: e01, e02, xvec
+      e01 = p1 % x - p0 % x
+      e02 = p2 % x - p0 % x
+      xvec = vec_product(e01, e02)
+      area = sqrt(sum(xvec**2))*0.5_WP
+    end function point_mag3
+
+
+
+    elemental function point_mag4(p0, p1, p2, p3) result(volu)
+      real(WP) :: volu
+      class(point_t), intent(in) :: p0, p1, p2, p3
+!
+! Volume of tetrahedra P0/P1/P2/P3 (P3 must on right-hand side loop P0/P1/P2)
+!
+      real(WP), dimension(POINT_DIM) :: e01, e02, nvec
+      real(WP) :: leng, area, pp, heig
+      e01 = p1 % x - p0 % x
+      e02 = p2 % x - p0 % x
+      nvec = vec_product(e01, e02)
+      leng = sqrt(sum(nvec**2))
+      area = leng * 0.5_WP
+      nvec = nvec / leng
+      pp = -dot_product(nvec, p0 % x)
+      heig = dot_product(nvec, p3 % x) + pp
+      volu = area * heig / 3.0_WP
+    end function point_mag4
+
+
+
     elemental logical function point_equals(p0, p1)
       class(point_t), intent(in) :: p0, p1
       point_equals = all(p0 % x == p1 % x)
@@ -138,6 +193,17 @@
         endif
       enddo
     end function
+
+
+
+    pure function vec_product(a, b) result(c)
+      real(WP), intent(in) :: a(POINT_DIM), b(POINT_DIM)
+      real(WP) :: c(POINT_DIM)
+      c(1) = a(2)*b(3) - a(3)*b(2)
+      c(2) = a(3)*b(1) - a(1)*b(3)
+      c(3) = a(1)*b(2) - a(2)*b(1)
+    end function vec_product
+
 
 
 

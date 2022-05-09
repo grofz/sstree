@@ -11,10 +11,11 @@
     type point_t
       real(WP) :: x(POINT_DIM)
     contains
-      procedure :: distance => point_distance
+      generic :: distance => point_distance1, point_distance3
       procedure :: isin => point_isin
       procedure, private :: point_equals
       generic :: operator(==) => point_equals
+      procedure, private :: point_distance1, point_distance3
     end type
 
     interface point_t
@@ -108,7 +109,7 @@
 !
 ! Point class methods
 !
-    elemental function point_distance(p0, p1) result(dis)
+    elemental function point_distance1(p0, p1) result(dis)
       real(WP) :: dis
       class(point_t), intent(in) :: p0, p1
 
@@ -121,7 +122,36 @@
       !     it equals only if C lies on the line AB 
       dis = sum((p0 % x - p1 % x)**2)
       dis = sqrt(dis)
-    end function point_distance
+    end function point_distance1
+
+
+
+    elemental function point_distance3(p0, p1, p2, p3, ilength) result(dis)
+      real(WP) :: dis
+      class(point_t), intent(in) :: p0, p1, p2, p3
+      logical, intent(in), optional :: ilength
+!
+! Distance of P0 to plane defined by triangle P1-P2-P3. Right-hand loop
+! P1-P2-P3 defines a positive distance. If ilength==.false., only sign
+! of the returned distance can be used
+!
+      real(WP), dimension(POINT_DIM) :: e12, e13, nvec
+      real(WP) :: pp, nvec_len
+      logical :: ilength0
+
+      ilength0 = .true.
+      if (present(ilength)) ilength0 = ilength
+      e12 = p2%x - p1%x
+      e13 = p3%x - p1%x
+      nvec = vec_product(e12, e13)
+      pp = -dot_product(nvec, p1%x)
+      dis = dot_product(nvec, p0%x) + pp
+
+      if (ilength0) then
+        nvec_len = sqrt(sum(nvec**2))
+        dis = dis / nvec_len
+      endif
+    end function point_distance3
 
 
 
